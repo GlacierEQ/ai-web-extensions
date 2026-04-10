@@ -1,8 +1,10 @@
 // Requires lib/chatgpt.min.js
+// Requires lib/deep-dive.js (loaded before this file)
 
 window.infinity = {
 
     async activate() {
+        // First turn: generate a question on the configured topic
         const activatePrompt = 'Generate a single random question'
             +( app.config.replyLanguage ? ( ' in ' + app.config.replyLanguage ) : '' )
             +( ' on ' + ( app.config.replyTopic == 'ALL' ? 'ALL topics' : 'the topic of ' + app.config.replyTopic ))
@@ -23,7 +25,22 @@ window.infinity = {
 
     async continue() {
         if (!app.config.autoScrollDisabled) try { chatgpt.scrollToBottom() } catch(err) {}
-        chatgpt.send('Do it again.')
+
+        // ── DEEP DIVE: replace "Do it again." with an intelligent follow-up ──
+        let nextPrompt = 'Do it again.' // fallback if deepDive unavailable
+        if (typeof deepDive !== 'undefined') {
+            try {
+                const lastReply = await chatgpt.getLastResponse()
+                if (lastReply && lastReply.trim().length > 40) {
+                    nextPrompt = deepDive.nextPrompt(lastReply, app.config.replyTopic || '')
+                }
+            } catch (e) {
+                console.warn('[DeepDive] Could not get last reply, using fallback:', e)
+            }
+        }
+        // ─────────────────────────────────────────────────────────────────────
+
+        chatgpt.send(nextPrompt)
         await chatgpt.isIdle() // before starting delay till next iteration
         if (infinity.isActive) // replace timer
             infinity.isActive = setTimeout(infinity.continue, parseInt(app.config.replyInterval, 10) * 1000)
@@ -32,6 +49,7 @@ window.infinity = {
     deactivate() {
         if (chatgpt.getStopBtn()) chatgpt.stop()
         clearTimeout(infinity.isActive) ; infinity.isActive = null
+        if (typeof deepDive !== 'undefined') deepDive.reset() // reset lens history on stop
     },
 
     async restart(options = { target: 'new' }) {
